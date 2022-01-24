@@ -82,7 +82,7 @@ impl Payload {
 /// (see [SignedCommitment]) forms the BEEFY protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode)]
 pub struct Commitment<TBlockNumber> {
-	///  A collection of payloads to be signed, see [`Payload`] for details.
+	/// A collection of payloads to be signed, see [`Payload`] for details.
 	///
 	/// One of the payloads should be some form of cumulative representation of the chain (think
 	/// MMR root hash). Additionally one of the payloads should also contain some details that

@@ -418,6 +418,7 @@ where
 							(vote.id, vote.signature),
 						);
 					} else {
+						error!(target: "beefy", "🥩 Failed to decode vote.");
 						return;
 					}
 				},
