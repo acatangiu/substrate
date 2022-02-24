@@ -30,7 +30,7 @@ use parking_lot::Mutex;
 use sc_client_api::{Backend, FinalityNotification, FinalityNotifications};
 use sc_network_gossip::GossipEngine;
 
-use sp_api::BlockId;
+use sp_api::{BlockId, ProvideRuntimeApi};
 use sp_arithmetic::traits::AtLeast32Bit;
 use sp_runtime::{
 	generic::OpaqueDigestItemId,
@@ -54,12 +54,13 @@ use crate::{
 	round, Client,
 };
 
-pub(crate) struct WorkerParams<B, BE, C>
+pub(crate) struct WorkerParams<B, BE, C, R>
 where
 	B: Block,
 {
 	pub client: Arc<C>,
 	pub backend: Arc<BE>,
+	pub runtime: Arc<R>,
 	pub key_store: BeefyKeystore,
 	pub signed_commitment_sender: BeefySignedCommitmentSender<B>,
 	pub beefy_best_block_sender: BeefyBestBlockSender<B>,
@@ -98,14 +99,16 @@ impl Stream for BeefyTicker {
 }
 
 /// A BEEFY worker plays the BEEFY protocol
-pub(crate) struct BeefyWorker<B, C, BE>
+pub(crate) struct BeefyWorker<B, C, BE, R>
 where
 	B: Block,
 	BE: Backend<B>,
 	C: Client<B, BE>,
+	R: ProvideRuntimeApi<B>,
 {
 	client: Arc<C>,
 	backend: Arc<BE>,
+	runtime: Arc<R>,
 	key_store: BeefyKeystore,
 	signed_commitment_sender: BeefySignedCommitmentSender<B>,
 	gossip_engine: Arc<Mutex<GossipEngine<B>>>,
@@ -129,12 +132,13 @@ where
 	_backend: PhantomData<BE>,
 }
 
-impl<B, C, BE> BeefyWorker<B, C, BE>
+impl<B, C, BE, R> BeefyWorker<B, C, BE, R>
 where
 	B: Block + Codec,
 	BE: Backend<B>,
 	C: Client<B, BE>,
-	C::Api: BeefyApi<B>,
+	R: ProvideRuntimeApi<B>,
+	R::Api: BeefyApi<B>,
 {
 	/// Return a new BEEFY worker instance.
 	///
@@ -142,10 +146,11 @@ where
 	/// BEEFY pallet has been deployed on-chain.
 	///
 	/// The BEEFY pallet is needed in order to keep track of the BEEFY authority set.
-	pub(crate) fn new(worker_params: WorkerParams<B, BE, C>) -> Self {
+	pub(crate) fn new(worker_params: WorkerParams<B, BE, C, R>) -> Self {
 		let WorkerParams {
 			client,
 			backend,
+			runtime,
 			key_store,
 			signed_commitment_sender,
 			beefy_best_block_sender,
@@ -162,6 +167,7 @@ where
 		BeefyWorker {
 			client: client.clone(),
 			backend,
+			runtime,
 			key_store,
 			signed_commitment_sender,
 			gossip_engine: Arc::new(Mutex::new(gossip_engine)),
@@ -181,12 +187,13 @@ where
 	}
 }
 
-impl<B, C, BE> BeefyWorker<B, C, BE>
+impl<B, C, BE, R> BeefyWorker<B, C, BE, R>
 where
 	B: Block,
 	BE: Backend<B>,
 	C: Client<B, BE>,
-	C::Api: BeefyApi<B>,
+	R: ProvideRuntimeApi<B>,
+	R::Api: BeefyApi<B>,
 {
 	/// Return `Some(number)` if we should be voting on block `number` now,
 	/// return `None` if there is no block we should vote on now.
@@ -224,7 +231,7 @@ where
 			Some(new)
 		} else {
 			let at = BlockId::hash(header.hash());
-			self.client.runtime_api().validator_set(&at).ok().flatten()
+			self.runtime.runtime_api().validator_set(&at).ok().flatten()
 		};
 
 		trace!(target: "beefy", "🥩 active validator set: {:?}", new);
