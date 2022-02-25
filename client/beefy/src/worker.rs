@@ -448,7 +448,7 @@ where
 				hash
 			} else {
 				warn!(target: "beefy", "🥩 No MMR root digest found for: {:?}", target_hash);
-				return
+				Default::default()
 			};
 			let payload = Payload::new(known_payload_ids::MMR_ROOT_ID, mmr_root.encode());
 
