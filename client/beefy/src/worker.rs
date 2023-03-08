@@ -252,7 +252,7 @@ pub(crate) struct WorkerParams<B: Block, BE, P, R, N> {
 	pub key_store: BeefyKeystore,
 	pub gossip_engine: GossipEngine<B>,
 	pub gossip_validator: Arc<GossipValidator<B>>,
-	pub on_demand_justifications: OnDemandJustificationsEngine<B>,
+	// pub on_demand_justifications: OnDemandJustificationsEngine<B>,
 	pub links: BeefyVoterLinks<B>,
 	pub metrics: Option<VoterMetrics>,
 	pub persisted_state: PersistedState<B>,
@@ -307,7 +307,7 @@ pub(crate) struct BeefyWorker<B: Block, BE, P, RuntimeApi, N> {
 	// communication
 	gossip_engine: GossipEngine<B>,
 	gossip_validator: Arc<GossipValidator<B>>,
-	on_demand_justifications: OnDemandJustificationsEngine<B>,
+	// on_demand_justifications: OnDemandJustificationsEngine<B>,
 
 	// channels
 	/// Links between the block importer, the background voter and the RPC layer.
@@ -354,7 +354,7 @@ where
 			network,
 			gossip_engine,
 			gossip_validator,
-			on_demand_justifications,
+			// on_demand_justifications,
 			links,
 			metrics,
 			persisted_state,
@@ -368,7 +368,7 @@ where
 			key_store,
 			gossip_engine,
 			gossip_validator,
-			on_demand_justifications,
+			// on_demand_justifications,
 			links,
 			metrics,
 			pending_votes: BTreeMap::new(),
@@ -627,7 +627,7 @@ where
 
 			metric_set!(self, beefy_best_block, block_num);
 
-			self.on_demand_justifications.cancel_requests_older_than(block_num);
+			// self.on_demand_justifications.cancel_requests_older_than(block_num);
 
 			if let Err(e) = self
 				.backend
@@ -841,12 +841,12 @@ where
 			if let Err(err) = self.try_to_vote() {
 				debug!(target: LOG_TARGET, "🥩 {}", err);
 			}
-			// If the current target is a mandatory block,
-			// make sure there's also an on-demand justification request out for it.
-			if let Some((block, active)) = self.voting_oracle().mandatory_pending() {
-				// This only starts new request if there isn't already an active one.
-				self.on_demand_justifications.request(block, active);
-			}
+			// // If the current target is a mandatory block,
+			// // make sure there's also an on-demand justification request out for it.
+			// if let Some((block, active)) = self.voting_oracle().mandatory_pending() {
+			// 	// This only starts new request if there isn't already an active one.
+			// 	self.on_demand_justifications.request(block, active);
+			// }
 		}
 	}
 
@@ -902,14 +902,14 @@ where
 						return;
 					}
 				},
-				// Process incoming justifications as these can make some in-flight votes obsolete.
-				justif = self.on_demand_justifications.next().fuse() => {
-					if let Some(justif) = justif {
-						if let Err(err) = self.triage_incoming_justif(justif) {
-							debug!(target: LOG_TARGET, "🥩 {}", err);
-						}
-					}
-				},
+				// // Process incoming justifications as these can make some in-flight votes obsolete.
+				// justif = self.on_demand_justifications.next().fuse() => {
+				// 	if let Some(justif) = justif {
+				// 		if let Err(err) = self.triage_incoming_justif(justif) {
+				// 			debug!(target: LOG_TARGET, "🥩 {}", err);
+				// 		}
+				// 	}
+				// },
 				justif = block_import_justif.next() => {
 					if let Some(justif) = justif {
 						// Block import justifications have already been verified to be valid

@@ -178,9 +178,9 @@ pub struct BeefyNetworkParams<B: Block, N> {
 	/// Chain specific BEEFY gossip protocol name. See
 	/// [`communication::beefy_protocol_name::gossip_protocol_name`].
 	pub gossip_protocol_name: ProtocolName,
-	/// Chain specific BEEFY on-demand justifications protocol name. See
-	/// [`communication::beefy_protocol_name::justifications_protocol_name`].
-	pub justifications_protocol_name: ProtocolName,
+	// /// Chain specific BEEFY on-demand justifications protocol name. See
+	// /// [`communication::beefy_protocol_name::justifications_protocol_name`].
+	// pub justifications_protocol_name: ProtocolName,
 
 	pub _phantom: PhantomData<B>,
 }
@@ -205,8 +205,8 @@ pub struct BeefyParams<B: Block, BE, C, N, P, R> {
 	pub prometheus_registry: Option<Registry>,
 	/// Links between the block importer, the background voter and the RPC layer.
 	pub links: BeefyVoterLinks<B>,
-	/// Handler for incoming BEEFY justifications requests from a remote peer.
-	pub on_demand_justifications_handler: BeefyJustifsRequestHandler<B, C>,
+	// /// Handler for incoming BEEFY justifications requests from a remote peer.
+	// pub on_demand_justifications_handler: BeefyJustifsRequestHandler<B, C>,
 }
 
 /// Start the BEEFY gadget.
@@ -232,10 +232,10 @@ where
 		min_block_delta,
 		prometheus_registry,
 		links,
-		on_demand_justifications_handler,
+		// on_demand_justifications_handler,
 	} = beefy_params;
 
-	let BeefyNetworkParams { network, gossip_protocol_name, justifications_protocol_name, .. } =
+	let BeefyNetworkParams { network, gossip_protocol_name, .. } =
 		network_params;
 
 	let known_peers = Arc::new(Mutex::new(KnownPeers::new()));
@@ -250,12 +250,12 @@ where
 	let metrics = register_metrics(prometheus_registry.clone());
 
 	// The `GossipValidator` adds and removes known peers based on valid votes and network events.
-	let on_demand_justifications = OnDemandJustificationsEngine::new(
-		network.clone(),
-		justifications_protocol_name,
-		known_peers,
-		prometheus_registry.clone(),
-	);
+	// let on_demand_justifications = OnDemandJustificationsEngine::new(
+	// 	network.clone(),
+	// 	justifications_protocol_name,
+	// 	known_peers,
+	// 	prometheus_registry.clone(),
+	// );
 
 	// Subscribe to finality notifications and justifications before waiting for runtime pallet and
 	// reuse the streams, so we don't miss notifications while waiting for pallet to be available.
@@ -284,7 +284,7 @@ where
 		key_store: key_store.into(),
 		gossip_engine,
 		gossip_validator,
-		on_demand_justifications,
+		// on_demand_justifications,
 		links,
 		metrics,
 		persisted_state,
@@ -292,11 +292,12 @@ where
 
 	let worker = worker::BeefyWorker::<_, _, _, _, _>::new(worker_params);
 
-	futures::future::join(
-		worker.run(block_import_justif, finality_notifications),
-		on_demand_justifications_handler.run(),
-	)
-	.await;
+	// futures::future::join(
+	// 	worker.run(block_import_justif, finality_notifications),
+	// 	on_demand_justifications_handler.run(),
+	// )
+	// .await;
+	worker.run(block_import_justif, finality_notifications).await;
 }
 
 fn load_or_init_voter_state<B, BE, R>(

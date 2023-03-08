@@ -48,6 +48,10 @@ pub(crate) mod beefy_protocol_name {
 		}
 	}
 
+	pub fn dummy_justifications_protocol_name<Hash: AsRef<[u8]>>() -> ProtocolName {
+		format!("/kata/{}", JUSTIFICATIONS_NAME).into()
+	}
+
 	/// Name of the BEEFY justifications request-response protocol.
 	pub fn justifications_protocol_name<Hash: AsRef<[u8]>>(
 		genesis_hash: Hash,
