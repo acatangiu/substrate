@@ -235,19 +235,19 @@ where
 		// on_demand_justifications_handler,
 	} = beefy_params;
 
-	let BeefyNetworkParams { network, gossip_protocol_name, .. } =
-		network_params;
-
-	let known_peers = Arc::new(Mutex::new(KnownPeers::new()));
-	let gossip_validator =
-		Arc::new(communication::gossip::GossipValidator::new(known_peers.clone()));
-	let mut gossip_engine = sc_network_gossip::GossipEngine::new(
-		network.clone(),
-		gossip_protocol_name,
-		gossip_validator.clone(),
-		None,
-	);
-	let metrics = register_metrics(prometheus_registry.clone());
+	// let BeefyNetworkParams { network, gossip_protocol_name, .. } =
+	// 	network_params;
+	//
+	// let known_peers = Arc::new(Mutex::new(KnownPeers::new()));
+	// let gossip_validator =
+	// 	Arc::new(communication::gossip::GossipValidator::new(known_peers.clone()));
+	// let mut gossip_engine = sc_network_gossip::GossipEngine::new(
+	// 	network.clone(),
+	// 	gossip_protocol_name,
+	// 	gossip_validator.clone(),
+	// 	None,
+	// );
+	// let metrics = register_metrics(prometheus_registry.clone());
 
 	// The `GossipValidator` adds and removes known peers based on valid votes and network events.
 	// let on_demand_justifications = OnDemandJustificationsEngine::new(
@@ -264,7 +264,7 @@ where
 
 	// Wait for BEEFY pallet to be active before starting voter.
 	let persisted_state =
-		match wait_for_runtime_pallet(&*runtime, &mut gossip_engine, &mut finality_notifications)
+		match wait_for_runtime_pallet(&*runtime, &mut finality_notifications)
 			.await
 			.and_then(|best_grandpa| {
 				load_or_init_voter_state(&*backend, &*runtime, best_grandpa, min_block_delta)
@@ -275,6 +275,20 @@ where
 				return
 			},
 		};
+
+	let BeefyNetworkParams { network, gossip_protocol_name, .. } =
+		network_params;
+
+	let known_peers = Arc::new(Mutex::new(KnownPeers::new()));
+	let gossip_validator =
+		Arc::new(communication::gossip::GossipValidator::new(known_peers.clone()));
+	let mut gossip_engine = sc_network_gossip::GossipEngine::new(
+		network.clone(),
+		gossip_protocol_name,
+		gossip_validator.clone(),
+		None,
+	);
+	let metrics = register_metrics(prometheus_registry.clone());
 
 	let worker_params = worker::WorkerParams {
 		backend,
@@ -426,7 +440,7 @@ where
 /// Should be called only once during worker initialization.
 async fn wait_for_runtime_pallet<B, R>(
 	runtime: &R,
-	mut gossip_engine: &mut GossipEngine<B>,
+	// mut gossip_engine: &mut GossipEngine<B>,
 	finality: &mut Fuse<FinalityNotifications<B>>,
 ) -> ClientResult<<B as Block>::Header>
 where
@@ -455,9 +469,9 @@ where
 					}
 				}
 			},
-			_ = gossip_engine => {
-				break
-			}
+			// _ = gossip_engine => {
+			// 	break
+			// }
 		}
 	}
 	let err_msg = "🥩 Gossip engine has unexpectedly terminated.".into();
