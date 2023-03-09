@@ -69,6 +69,8 @@ pub mod justification;
 pub use communication::beefy_protocol_name::{
 	gossip_protocol_name, justifications_protocol_name as justifs_protocol_name,
 };
+use sc_utils::notification::NotificationReceiver;
+use crate::justification::BeefyVersionedFinalityProof;
 
 #[cfg(test)]
 mod tests;
@@ -260,11 +262,11 @@ where
 	// Subscribe to finality notifications and justifications before waiting for runtime pallet and
 	// reuse the streams, so we don't miss notifications while waiting for pallet to be available.
 	let mut finality_notifications = client.finality_notification_stream().fuse();
-	let block_import_justif = links.from_block_import_justif_stream.subscribe(100_000).fuse();
+	let mut block_import_justif = links.from_block_import_justif_stream.subscribe(100_000).fuse();
 
 	// Wait for BEEFY pallet to be active before starting voter.
 	let persisted_state =
-		match wait_for_runtime_pallet(&*runtime, &mut finality_notifications)
+		match wait_for_runtime_pallet(&*runtime, &mut finality_notifications, &mut block_import_justif)
 			.await
 			.and_then(|best_grandpa| {
 				load_or_init_voter_state(&*backend, &*runtime, best_grandpa, min_block_delta)
@@ -276,42 +278,42 @@ where
 			},
 		};
 
-	let BeefyNetworkParams { network, gossip_protocol_name, .. } =
-		network_params;
-
-	let known_peers = Arc::new(Mutex::new(KnownPeers::new()));
-	let gossip_validator =
-		Arc::new(communication::gossip::GossipValidator::new(known_peers.clone()));
-	let mut gossip_engine = sc_network_gossip::GossipEngine::new(
-		network.clone(),
-		gossip_protocol_name,
-		gossip_validator.clone(),
-		None,
-	);
-	let metrics = register_metrics(prometheus_registry.clone());
-
-	let worker_params = worker::WorkerParams {
-		backend,
-		payload_provider,
-		runtime,
-		network,
-		key_store: key_store.into(),
-		gossip_engine,
-		gossip_validator,
-		// on_demand_justifications,
-		links,
-		metrics,
-		persisted_state,
-	};
-
-	let worker = worker::BeefyWorker::<_, _, _, _, _>::new(worker_params);
-
-	// futures::future::join(
-	// 	worker.run(block_import_justif, finality_notifications),
-	// 	on_demand_justifications_handler.run(),
-	// )
-	// .await;
-	worker.run(block_import_justif, finality_notifications).await;
+	// let BeefyNetworkParams { network, gossip_protocol_name, .. } =
+	// 	network_params;
+	//
+	// let known_peers = Arc::new(Mutex::new(KnownPeers::new()));
+	// let gossip_validator =
+	// 	Arc::new(communication::gossip::GossipValidator::new(known_peers.clone()));
+	// let mut gossip_engine = sc_network_gossip::GossipEngine::new(
+	// 	network.clone(),
+	// 	gossip_protocol_name,
+	// 	gossip_validator.clone(),
+	// 	None,
+	// );
+	// let metrics = register_metrics(prometheus_registry.clone());
+	//
+	// let worker_params = worker::WorkerParams {
+	// 	backend,
+	// 	payload_provider,
+	// 	runtime,
+	// 	network,
+	// 	key_store: key_store.into(),
+	// 	gossip_engine,
+	// 	gossip_validator,
+	// 	// on_demand_justifications,
+	// 	links,
+	// 	metrics,
+	// 	persisted_state,
+	// };
+	//
+	// let worker = worker::BeefyWorker::<_, _, _, _, _>::new(worker_params);
+	//
+	// // futures::future::join(
+	// // 	worker.run(block_import_justif, finality_notifications),
+	// // 	on_demand_justifications_handler.run(),
+	// // )
+	// // .await;
+	// worker.run(block_import_justif, finality_notifications).await;
 }
 
 fn load_or_init_voter_state<B, BE, R>(
@@ -442,6 +444,7 @@ async fn wait_for_runtime_pallet<B, R>(
 	runtime: &R,
 	// mut gossip_engine: &mut GossipEngine<B>,
 	finality: &mut Fuse<FinalityNotifications<B>>,
+	block_import_justifs: &mut Fuse<NotificationReceiver<BeefyVersionedFinalityProof<B>>>,
 ) -> ClientResult<<B as Block>::Header>
 where
 	B: Block,
@@ -468,6 +471,9 @@ where
 						return Ok(notif.header)
 					}
 				}
+			},
+			justif = block_import_justifs.next() => {
+				error!(target: LOG_TARGET, "🥩 Got unexpected BEEFY justif: {:?}", justif);
 			},
 			// _ = gossip_engine => {
 			// 	break
