@@ -212,7 +212,7 @@ pub struct BeefyParams<B: Block, BE, C, N, P, R> {
 /// Start the BEEFY gadget.
 ///
 /// This is a thin shim around running and awaiting a BEEFY worker.
-pub async fn start_beefy_gadget<B, BE, C, N, P, R>(beefy_params: BeefyParams<B, BE, C, N, P, R>)
+pub async fn original_start_beefy_gadget<B, BE, C, N, P, R>(beefy_params: BeefyParams<B, BE, C, N, P, R>)
 where
 	B: Block,
 	BE: Backend<B>,
@@ -297,6 +297,39 @@ where
 		on_demand_justifications_handler.run(),
 	)
 	.await;
+}
+
+/// Start the BEEFY gadget.
+///
+/// This is a thin shim around running and awaiting a BEEFY worker.
+pub async fn start_beefy_gadget<B, BE, C, N, P, R>(beefy_params: BeefyParams<B, BE, C, N, P, R>)
+	where
+		B: Block,
+		BE: Backend<B>,
+		C: Client<B, BE> + BlockBackend<B>,
+		P: PayloadProvider<B>,
+		R: ProvideRuntimeApi<B>,
+		R::Api: BeefyApi<B> + MmrApi<B, MmrRootHash, NumberFor<B>>,
+		N: GossipNetwork<B> + NetworkRequest + SyncOracle + Send + Sync + 'static,
+{
+	let BeefyParams {
+		client: _client,
+		backend: _backend,
+		payload_provider: _payload_provider,
+		runtime: _runtime,
+		key_store: _key_store,
+		network_params: _network_params,
+		min_block_delta: _min_block_delta,
+		prometheus_registry: _prometheus_registry,
+		links,
+		on_demand_justifications_handler,
+	} = beefy_params;
+
+	on_demand_justifications_handler.run().await;
+
+	error!(target: LOG_TARGET, "🥩 on demand justif handler unexpectedly finished");
+
+	let _block_import_justif = links.from_block_import_justif_stream.subscribe(100_000).fuse();
 }
 
 fn load_or_init_voter_state<B, BE, R>(

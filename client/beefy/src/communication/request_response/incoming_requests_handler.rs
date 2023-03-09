@@ -22,7 +22,7 @@ use futures::{
 	channel::{mpsc, oneshot},
 	StreamExt,
 };
-use log::{debug, trace};
+use log::debug;
 use sc_client_api::BlockBackend;
 use sc_network::{config as netconfig, config::RequestResponseConfig, PeerId, ReputationChange};
 use sc_network_common::protocol::ProtocolName;
@@ -184,7 +184,7 @@ where
 
 	/// Run [`BeefyJustifsRequestHandler`].
 	pub async fn run(mut self) {
-		trace!(target: BEEFY_SYNC_LOG_TARGET, "🥩 Running BeefyJustifsRequestHandler");
+		debug!(target: BEEFY_SYNC_LOG_TARGET, "🥩 Running BeefyJustifsRequestHandler");
 
 		while let Ok(request) = self.request_receiver.recv(|| vec![]).await {
 			let peer = request.peer;
