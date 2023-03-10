@@ -212,7 +212,7 @@ pub struct BeefyParams<B: Block, BE, C, N, P, R> {
 /// Start the BEEFY gadget.
 ///
 /// This is a thin shim around running and awaiting a BEEFY worker.
-pub async fn original_start_beefy_gadget<B, BE, C, N, P, R>(beefy_params: BeefyParams<B, BE, C, N, P, R>)
+pub async fn start_beefy_gadget<B, BE, C, N, P, R>(beefy_params: BeefyParams<B, BE, C, N, P, R>)
 where
 	B: Block,
 	BE: Backend<B>,
@@ -225,13 +225,13 @@ where
 	let BeefyParams {
 		client,
 		backend,
-		payload_provider,
+		payload_provider: _,
 		runtime,
-		key_store,
+		key_store: _,
 		network_params,
 		min_block_delta,
-		prometheus_registry,
-		links,
+		prometheus_registry: _,
+		links: _,
 		on_demand_justifications_handler,
 	} = beefy_params;
 
@@ -247,20 +247,20 @@ where
 		gossip_validator.clone(),
 		None,
 	);
-	let metrics = register_metrics(prometheus_registry.clone());
+	// let metrics = register_metrics(prometheus_registry.clone());
 
-	// The `GossipValidator` adds and removes known peers based on valid votes and network events.
-	let on_demand_justifications = OnDemandJustificationsEngine::new(
-		network.clone(),
-		justifications_protocol_name,
-		known_peers,
-		prometheus_registry.clone(),
-	);
+	// // The `GossipValidator` adds and removes known peers based on valid votes and network events.
+	// let on_demand_justifications = OnDemandJustificationsEngine::new(
+	// 	network.clone(),
+	// 	justifications_protocol_name,
+	// 	known_peers,
+	// 	prometheus_registry.clone(),
+	// );
 
 	// Subscribe to finality notifications and justifications before waiting for runtime pallet and
 	// reuse the streams, so we don't miss notifications while waiting for pallet to be available.
 	let mut finality_notifications = client.finality_notification_stream().fuse();
-	let block_import_justif = links.from_block_import_justif_stream.subscribe(100_000).fuse();
+	// let block_import_justif = links.from_block_import_justif_stream.subscribe(100_000).fuse();
 
 	// Wait for BEEFY pallet to be active before starting voter.
 	let persisted_state =
@@ -276,60 +276,7 @@ where
 			},
 		};
 
-	let worker_params = worker::WorkerParams {
-		backend,
-		payload_provider,
-		runtime,
-		network,
-		key_store: key_store.into(),
-		gossip_engine,
-		gossip_validator,
-		on_demand_justifications,
-		links,
-		metrics,
-		persisted_state,
-	};
-
-	let worker = worker::BeefyWorker::<_, _, _, _, _>::new(worker_params);
-
-	futures::future::join(
-		worker.run(block_import_justif, finality_notifications),
-		on_demand_justifications_handler.run(),
-	)
-	.await;
-}
-
-/// Start the BEEFY gadget.
-///
-/// This is a thin shim around running and awaiting a BEEFY worker.
-pub async fn start_beefy_gadget<B, BE, C, N, P, R>(beefy_params: BeefyParams<B, BE, C, N, P, R>)
-	where
-		B: Block,
-		BE: Backend<B>,
-		C: Client<B, BE> + BlockBackend<B>,
-		P: PayloadProvider<B>,
-		R: ProvideRuntimeApi<B>,
-		R::Api: BeefyApi<B> + MmrApi<B, MmrRootHash, NumberFor<B>>,
-		N: GossipNetwork<B> + NetworkRequest + SyncOracle + Send + Sync + 'static,
-{
-	let BeefyParams {
-		client: _client,
-		backend: _backend,
-		payload_provider: _payload_provider,
-		runtime: _runtime,
-		key_store: _key_store,
-		network_params: _network_params,
-		min_block_delta: _min_block_delta,
-		prometheus_registry: _prometheus_registry,
-		links,
-		on_demand_justifications_handler,
-	} = beefy_params;
-
 	on_demand_justifications_handler.run().await;
-
-	error!(target: LOG_TARGET, "🥩 on demand justif handler unexpectedly finished");
-
-	let _block_import_justif = links.from_block_import_justif_stream.subscribe(100_000).fuse();
 }
 
 fn load_or_init_voter_state<B, BE, R>(
