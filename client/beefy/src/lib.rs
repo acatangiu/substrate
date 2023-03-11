@@ -34,7 +34,6 @@ use crate::{
 };
 use beefy_primitives::{
 	crypto::AuthorityId, BeefyApi, MmrRootHash, PayloadProvider, ValidatorSet, BEEFY_ENGINE_ID,
-	GENESIS_AUTHORITY_SET_ID,
 };
 use futures::{stream::Fuse, StreamExt};
 use log::{error, info};
@@ -225,20 +224,20 @@ where
 	let BeefyParams {
 		client,
 		backend,
-		payload_provider: _,
+		payload_provider,
 		runtime,
-		key_store: _,
+		key_store,
 		network_params,
 		min_block_delta,
-		prometheus_registry: _,
-		links: _,
+		prometheus_registry,
+		links,
 		on_demand_justifications_handler,
 	} = beefy_params;
 
-	let BeefyNetworkParams { network, gossip_protocol_name, .. } =
+	let BeefyNetworkParams { network, gossip_protocol_name, justifications_protocol_name, .. } =
 		network_params;
 
-	let known_peers = Arc::new(Mutex::new(KnownPeers::<B>::new()));
+	let known_peers = Arc::new(Mutex::new(KnownPeers::new()));
 	let gossip_validator =
 		Arc::new(communication::gossip::GossipValidator::new(known_peers.clone()));
 	let mut gossip_engine = sc_network_gossip::GossipEngine::new(
@@ -247,32 +246,56 @@ where
 		gossip_validator.clone(),
 		None,
 	);
+	let metrics = register_metrics(prometheus_registry.clone());
+
+	// The `GossipValidator` adds and removes known peers based on valid votes and network events.
+	let on_demand_justifications = OnDemandJustificationsEngine::new(
+		network.clone(),
+		justifications_protocol_name,
+		known_peers,
+		prometheus_registry.clone(),
+	);
 
 	// Subscribe to finality notifications and justifications before waiting for runtime pallet and
 	// reuse the streams, so we don't miss notifications while waiting for pallet to be available.
-	// let mut finality_notifications = client.finality_notification_stream().fuse();
-	//
-	// // Wait for BEEFY pallet to be active before starting voter.
-	// let _ = wait_for_runtime_pallet(
-	// 	&*runtime,
-	// 	// &mut gossip_engine,
-	// 	&mut finality_notifications,
-	// )
-	// .await;
+	let mut finality_notifications = client.finality_notification_stream().fuse();
+	let block_import_justif = links.from_block_import_justif_stream.subscribe(100_000).fuse();
 
-	// on_demand_justifications_handler.run().await;
+	// Wait for BEEFY pallet to be active before starting voter.
+	let persisted_state =
+		match wait_for_runtime_pallet(&*runtime, &mut gossip_engine, &mut finality_notifications)
+			.await
+			.and_then(|best_grandpa| {
+				load_or_init_voter_state(&*backend, &*runtime, best_grandpa, min_block_delta)
+			}) {
+			Ok(state) => state,
+			Err(e) => {
+				error!(target: LOG_TARGET, "Error: {:?}. Terminating.", e);
+				return
+			},
+		};
 
-	use futures::FutureExt;
-	futures::select! {
-		_ = gossip_engine => {
-			error!(target: LOG_TARGET, "🥩 gossip engine terminated");
-		},
-		_ = on_demand_justifications_handler.run().fuse() => {
-			error!(target: LOG_TARGET, "🥩 on_demand_justifications_handler terminated");
-		}
+	let worker_params = worker::WorkerParams {
+		backend,
+		payload_provider,
+		runtime,
+		network,
+		key_store: key_store.into(),
+		gossip_engine,
+		gossip_validator,
+		on_demand_justifications,
+		links,
+		metrics,
+		persisted_state,
 	};
 
-	error!(target: LOG_TARGET, "🥩 BEEFY gadget terminated");
+	let worker = worker::BeefyWorker::<_, _, _, _, _>::new(worker_params);
+
+	futures::future::join(
+		worker.run(block_import_justif, finality_notifications),
+		on_demand_justifications_handler.run(),
+	)
+	.await;
 }
 
 fn load_or_init_voter_state<B, BE, R>(
@@ -316,12 +339,7 @@ where
 	R: ProvideRuntimeApi<B>,
 	R::Api: BeefyApi<B>,
 {
-	let beefy_genesis = runtime
-		.runtime_api()
-		.beefy_genesis(best_grandpa.hash())
-		.ok()
-		.flatten()
-		.ok_or_else(|| ClientError::Backend("BEEFY pallet expected to be active.".into()))?;
+	let beefy_genesis = *best_grandpa.number();
 	// Walk back the imported blocks and initialize voter either, at the last block with
 	// a BEEFY justification, or at pallet genesis block; voter will resume from there.
 	let blockchain = backend.blockchain();
@@ -357,7 +375,7 @@ where
 		if *header.number() == beefy_genesis {
 			// We've reached BEEFY genesis, initialize voter here.
 			let genesis_set =
-				expect_validator_set(runtime, header.hash()).and_then(genesis_set_sanity_check)?;
+				expect_validator_set(runtime, header.hash())?;
 			info!(
 				target: LOG_TARGET,
 				"🥩 Loading BEEFY voter state from genesis on what appears to be first startup. \
@@ -400,8 +418,8 @@ where
 /// Wait for BEEFY runtime pallet to be available, return active validator set.
 /// Should be called only once during worker initialization.
 async fn wait_for_runtime_pallet<B, R>(
-	runtime: &R,
-	// mut gossip_engine: &mut GossipEngine<B>,
+	_runtime: &R,
+	mut gossip_engine: &mut GossipEngine<B>,
 	finality: &mut Fuse<FinalityNotifications<B>>,
 ) -> ClientResult<<B as Block>::Header>
 where
@@ -417,38 +435,22 @@ where
 					Some(notif) => notif,
 					None => break
 				};
-				let at = notif.header.hash();
-				if let Some(start) = runtime.runtime_api().beefy_genesis(at).ok().flatten() {
-					if *notif.header.number() >= start {
-						// Beefy pallet available, return header for best grandpa at the time.
-						info!(
-							target: LOG_TARGET,
-							"🥩 BEEFY pallet available: block {:?} beefy genesis {:?}",
-							notif.header.number(), start
-						);
-						return Ok(notif.header)
-					}
-				}
+				// Beefy pallet available, return header for best grandpa at the time.
+				info!(
+					target: LOG_TARGET,
+					"🥩 BEEFY wait no more: start {:?}",
+					notif.header.number(),
+				);
+				return Ok(notif.header)
 			},
-			// _ = gossip_engine => {
-			// 	break
-			// }
+			_ = gossip_engine => {
+				break
+			}
 		}
 	}
 	let err_msg = "🥩 Gossip engine has unexpectedly terminated.".into();
 	error!(target: LOG_TARGET, "{}", err_msg);
 	Err(ClientError::Backend(err_msg))
-}
-
-fn genesis_set_sanity_check(
-	active: ValidatorSet<AuthorityId>,
-) -> ClientResult<ValidatorSet<AuthorityId>> {
-	if active.id() == GENESIS_AUTHORITY_SET_ID {
-		Ok(active)
-	} else {
-		error!(target: LOG_TARGET, "🥩 Unexpected ID for genesis validator set {:?}.", active);
-		Err(ClientError::Backend("BEEFY Genesis sanity check failed.".into()))
-	}
 }
 
 fn expect_validator_set<B, R>(
