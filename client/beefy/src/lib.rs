@@ -228,48 +228,49 @@ where
 		payload_provider: _,
 		runtime,
 		key_store: _,
-		network_params: _,
+		network_params,
 		min_block_delta,
 		prometheus_registry: _,
 		links: _,
 		on_demand_justifications_handler,
 	} = beefy_params;
 
-	// let BeefyNetworkParams { network, gossip_protocol_name, justifications_protocol_name, .. } =
-	// 	network_params;
-	//
-	// let known_peers = Arc::new(Mutex::new(KnownPeers::new()));
-	// let gossip_validator =
-	// 	Arc::new(communication::gossip::GossipValidator::new(known_peers.clone()));
-	// let mut gossip_engine = sc_network_gossip::GossipEngine::new(
-	// 	network.clone(),
-	// 	gossip_protocol_name,
-	// 	gossip_validator.clone(),
-	// 	None,
-	// );
+	let BeefyNetworkParams { network, gossip_protocol_name, .. } =
+		network_params;
+
+	let known_peers = Arc::new(Mutex::new(KnownPeers::<B>::new()));
+	let gossip_validator =
+		Arc::new(communication::gossip::GossipValidator::new(known_peers.clone()));
+	let mut gossip_engine = sc_network_gossip::GossipEngine::new(
+		network.clone(),
+		gossip_protocol_name,
+		gossip_validator.clone(),
+		None,
+	);
 
 	// Subscribe to finality notifications and justifications before waiting for runtime pallet and
 	// reuse the streams, so we don't miss notifications while waiting for pallet to be available.
-	let mut finality_notifications = client.finality_notification_stream().fuse();
+	// let mut finality_notifications = client.finality_notification_stream().fuse();
+	//
+	// // Wait for BEEFY pallet to be active before starting voter.
+	// let _ = wait_for_runtime_pallet(
+	// 	&*runtime,
+	// 	// &mut gossip_engine,
+	// 	&mut finality_notifications,
+	// )
+	// .await;
 
-	// Wait for BEEFY pallet to be active before starting voter.
-	let _ = wait_for_runtime_pallet(
-		&*runtime,
-		// &mut gossip_engine,
-		&mut finality_notifications,
-	)
-	.await;
+	// on_demand_justifications_handler.run().await;
 
-	on_demand_justifications_handler.run().await;
-
-	// futures::select! {
-	// 	_ = gossip_engine => {
-	// 		error!(target: LOG_TARGET, "🥩 gossip engine terminated");
-	// 	},
-	// 	_ = on_demand_justifications_handler.run() => {
-	// 		error!(target: LOG_TARGET, "🥩 on_demand_justifications_handler terminated");
-	// 	}
-	// };
+	use futures::FutureExt;
+	futures::select! {
+		_ = gossip_engine => {
+			error!(target: LOG_TARGET, "🥩 gossip engine terminated");
+		},
+		_ = on_demand_justifications_handler.run().fuse() => {
+			error!(target: LOG_TARGET, "🥩 on_demand_justifications_handler terminated");
+		}
+	};
 
 	error!(target: LOG_TARGET, "🥩 BEEFY gadget terminated");
 }
