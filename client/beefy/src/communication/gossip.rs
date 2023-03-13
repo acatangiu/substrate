@@ -49,13 +49,14 @@ where
 pub type MessageHash = [u8; 8];
 
 struct KnownVotes<B: Block> {
+	genesis: Option<NumberFor<B>>,
 	last_done: Option<NumberFor<B>>,
 	live: BTreeMap<NumberFor<B>, fnv::FnvHashSet<MessageHash>>,
 }
 
 impl<B: Block> KnownVotes<B> {
 	pub fn new() -> Self {
-		Self { last_done: None, live: BTreeMap::new() }
+		Self { genesis: None, last_done: None, live: BTreeMap::new() }
 	}
 
 	/// Create new round votes set if not already present.
@@ -73,7 +74,7 @@ impl<B: Block> KnownVotes<B> {
 	///
 	/// Latest concluded round is still considered alive to allow proper gossiping for it.
 	fn is_live(&self, round: &NumberFor<B>) -> bool {
-		Some(*round) >= self.last_done
+		self.genesis.map_or(false, |g| *round >= g) && Some(*round) >= self.last_done
 	}
 
 	/// Add new _known_ `hash` to the round's known votes.
