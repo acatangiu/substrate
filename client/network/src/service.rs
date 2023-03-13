@@ -1057,7 +1057,7 @@ where
 	H: ExHashT,
 {
 	fn event_stream(&self, name: &'static str) -> Pin<Box<dyn Stream<Item = Event> + Send>> {
-		let (tx, rx) = out_events::channel(name, 100_000);
+		let (tx, rx) = out_events::channel(name, 1000);
 		let _ = self.to_worker.unbounded_send(ServiceToWorkerMsg::EventStream(tx));
 		Box::pin(rx)
 	}

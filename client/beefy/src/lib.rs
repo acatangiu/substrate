@@ -223,54 +223,33 @@ where
 	N: GossipNetwork<B> + NetworkRequest + SyncOracle + Send + Sync + 'static,
 {
 	let BeefyParams {
-		client,
-		backend,
+		client: _,
+		backend: _,
 		payload_provider: _,
-		runtime,
+		runtime: _,
 		key_store: _,
 		network_params,
-		min_block_delta,
+		min_block_delta: _,
 		prometheus_registry: _,
 		links: _,
-		on_demand_justifications_handler,
+		on_demand_justifications_handler: _,
 	} = beefy_params;
 
-	let BeefyNetworkParams { network, gossip_protocol_name, .. } =
-		network_params;
+	let BeefyNetworkParams { network, gossip_protocol_name, .. } = network_params;
 
 	let known_peers = Arc::new(Mutex::new(KnownPeers::<B>::new()));
 	let gossip_validator =
 		Arc::new(communication::gossip::GossipValidator::new(known_peers.clone()));
-	let mut gossip_engine = sc_network_gossip::GossipEngine::new(
+	let gossip_engine = sc_network_gossip::GossipEngine::new(
 		network.clone(),
 		gossip_protocol_name,
 		gossip_validator.clone(),
 		None,
 	);
 
-	// Subscribe to finality notifications and justifications before waiting for runtime pallet and
-	// reuse the streams, so we don't miss notifications while waiting for pallet to be available.
-	// let mut finality_notifications = client.finality_notification_stream().fuse();
-	//
-	// // Wait for BEEFY pallet to be active before starting voter.
-	// let _ = wait_for_runtime_pallet(
-	// 	&*runtime,
-	// 	// &mut gossip_engine,
-	// 	&mut finality_notifications,
-	// )
-	// .await;
+	info!(target: LOG_TARGET, "🥩 started beefy, just pumping gossip");
 
-	// on_demand_justifications_handler.run().await;
-
-	use futures::FutureExt;
-	futures::select! {
-		_ = gossip_engine => {
-			error!(target: LOG_TARGET, "🥩 gossip engine terminated");
-		},
-		_ = on_demand_justifications_handler.run().fuse() => {
-			error!(target: LOG_TARGET, "🥩 on_demand_justifications_handler terminated");
-		}
-	};
+	gossip_engine.await;
 
 	error!(target: LOG_TARGET, "🥩 BEEFY gadget terminated");
 }

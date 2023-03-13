@@ -20,6 +20,7 @@ use crate::{MessageIntent, Network, ValidationResult, Validator, ValidatorContex
 
 use ahash::AHashSet;
 use libp2p::PeerId;
+use log::info;
 use lru::LruCache;
 use prometheus_endpoint::{register, Counter, PrometheusError, Registry, U64};
 use sc_network_common::protocol::{role::ObservedRole, ProtocolName};
@@ -159,6 +160,7 @@ pub struct ConsensusGossip<B: BlockT> {
 	validator: Arc<dyn Validator<B>>,
 	next_broadcast: Instant,
 	metrics: Option<Metrics>,
+	should_log: bool,
 }
 
 impl<B: BlockT> ConsensusGossip<B> {
@@ -176,6 +178,11 @@ impl<B: BlockT> ConsensusGossip<B> {
 			},
 			None => None,
 		};
+		let should_log = protocol.contains("beefy");
+		info!(
+			target:"gossip",
+			"Registering ConsensusGossip protocol={:?} should log {:?}", protocol, should_log,
+		);
 
 		ConsensusGossip {
 			peers: HashMap::new(),
@@ -189,18 +196,18 @@ impl<B: BlockT> ConsensusGossip<B> {
 			validator,
 			next_broadcast: Instant::now() + REBROADCAST_INTERVAL,
 			metrics,
+			should_log,
 		}
 	}
 
 	/// Handle new connected peer.
 	pub fn new_peer(&mut self, network: &mut dyn Network<B>, who: PeerId, role: ObservedRole) {
-		tracing::trace!(
-			target:"gossip",
-			%who,
-			protocol = %self.protocol,
-			?role,
-			"Registering peer",
-		);
+		if self.should_log {
+			info!(
+				target:"gossip",
+				"Registering peer {:?} protocol={:?} role {:?}", who, self.protocol, role,
+			);
+		}
 		self.peers.insert(who, PeerConsensus { known_messages: Default::default() });
 
 		let validator = self.validator.clone();
@@ -217,6 +224,12 @@ impl<B: BlockT> ConsensusGossip<B> {
 	) {
 		if self.known_messages.put(message_hash, ()).is_none() {
 			self.messages.push(MessageEntry { message_hash, topic, message, sender });
+			if self.should_log && self.messages.len() % 100 == 0 {
+				info!(
+					target:"gossip",
+					"Queueing message #{:?}", self.messages.len(),
+				);
+			}
 
 			if let Some(ref metrics) = self.metrics {
 				metrics.registered_messages.inc();
@@ -240,6 +253,12 @@ impl<B: BlockT> ConsensusGossip<B> {
 		let mut context = NetworkContext { gossip: self, network };
 		validator.peer_disconnected(&mut context, &who);
 		self.peers.remove(&who);
+		if self.should_log {
+			info!(
+				target:"gossip",
+				"Remove peer {:?}", who,
+			);
+		}
 	}
 
 	/// Perform periodic maintenance
@@ -302,6 +321,13 @@ impl<B: BlockT> ConsensusGossip<B> {
 			metrics.expired_messages.inc_by(expired_messages as u64)
 		}
 
+		if self.should_log {
+			info!(
+				target:"gossip",
+				"protocol {:?} Cleaned up {} stale messages, {} left ({} known)",
+				self.protocol, expired_messages, self.messages.len(), known_messages.len(),
+			);
+		}
 		tracing::trace!(
 			target: "gossip",
 			protocol = %self.protocol,

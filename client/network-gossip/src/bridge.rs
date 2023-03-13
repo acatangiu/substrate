@@ -29,7 +29,7 @@ use futures::{
 	prelude::*,
 };
 use libp2p::PeerId;
-use log::trace;
+use log::{debug, info, trace};
 use prometheus_endpoint::Registry;
 use sp_runtime::traits::Block as BlockT;
 use std::{
@@ -55,6 +55,7 @@ pub struct GossipEngine<B: BlockT> {
 	forwarding_state: ForwardingState<B>,
 
 	is_terminated: bool,
+	should_log: bool,
 }
 
 /// A gossip engine receives messages from the network via the `network_event_stream` and forwards
@@ -86,6 +87,15 @@ impl<B: BlockT> GossipEngine<B> {
 	{
 		let protocol = protocol.into();
 		let network_event_stream = network.event_stream("network-gossip");
+		let should_log = protocol.contains("beefy");
+
+		if should_log {
+			info!(
+				target:"gossip",
+				"new GossipEngine protocol {:?} should log {}",
+				protocol, should_log,
+			);
+		}
 
 		GossipEngine {
 			state_machine: ConsensusGossip::new(validator, protocol.clone(), metrics_registry),
@@ -98,6 +108,7 @@ impl<B: BlockT> GossipEngine<B> {
 			forwarding_state: ForwardingState::Idle,
 
 			is_terminated: false,
+			should_log,
 		}
 	}
 
@@ -135,6 +146,14 @@ impl<B: BlockT> GossipEngine<B> {
 		}
 
 		self.message_sinks.entry(topic).or_default().push(tx);
+
+		if self.should_log {
+			info!(
+				target:"gossip",
+				"get messages_for topic {:?}",
+				topic,
+			);
+		}
 
 		rx
 	}
@@ -215,6 +234,13 @@ impl<B: BlockT> Future for GossipEngine<B> {
 									remote,
 									messages,
 								);
+								if this.should_log && to_forward.len() > 1 {
+									trace!(
+										target:"kata",
+										"NotificationsReceived to_forward len {:?}",
+										to_forward.len(),
+									);
+								}
 
 								this.forwarding_state = ForwardingState::Busy(to_forward.into());
 							},
@@ -236,11 +262,26 @@ impl<B: BlockT> Future for GossipEngine<B> {
 							continue
 						},
 					};
+					if this.should_log && to_forward.len() > 1 {
+						trace!(
+							target:"kata",
+							"ForwardingState::Busy to_forward len {:?}",
+							to_forward.len(),
+						);
+					}
 
 					let sinks = match this.message_sinks.get_mut(&topic) {
 						Some(sinks) => sinks,
 						None => continue,
 					};
+
+					if this.should_log {
+						trace!(
+							target:"kata",
+							"ForwardingState::Busy sinks len {:?}",
+							sinks.len(),
+						);
+					}
 
 					// Make sure all sinks for the given topic are ready.
 					for sink in sinks.iter_mut() {
@@ -256,12 +297,26 @@ impl<B: BlockT> Future for GossipEngine<B> {
 						}
 					}
 
+					if this.should_log {
+						trace!(
+							target:"kata",
+							"ForwardingState::Busy sinks not ready !!!!!!!!!.",
+						);
+					}
+
 					// Filter out all closed sinks.
 					sinks.retain(|sink| !sink.is_closed()); // (1)
 
 					if sinks.is_empty() {
 						this.message_sinks.remove(&topic);
 						continue
+					}
+
+					if this.should_log {
+						trace!(
+							target:"kata",
+							"ForwardingState::Busy Pushing consensus message to sinks for {}.", topic,
+						);
 					}
 
 					trace!(
