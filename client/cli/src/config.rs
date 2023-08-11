@@ -21,6 +21,7 @@
 use crate::{
 	arg_enums::Database, error::Result, DatabaseParams, ImportParams, KeystoreParams,
 	NetworkParams, NodeKeyParams, OffchainWorkerParams, PruningParams, SharedParams, SubstrateCli,
+	SyncMode,
 };
 use log::warn;
 use names::{Generator, Name};
@@ -476,6 +477,24 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 		let telemetry_endpoints = self.telemetry_endpoints(&chain_spec)?;
 		let runtime_cache_size = self.runtime_cache_size()?;
 
+		let mut disable_beefy = self.disable_beefy()?;
+		// BEEFY doesn't (yet) support warp sync:
+		// Until we implement https://github.com/paritytech/substrate/issues/14756
+		// - disallow warp sync for validators,
+		// - disable BEEFY when warp sync for non-validators.
+		let is_warp_sync = self
+			.network_params()
+			.map(|params| params.sync == SyncMode::Warp)
+			.unwrap_or(false);
+		if !disable_beefy && is_warp_sync {
+			if is_validator {
+				return Err("Warp sync not supported for validator nodes running BEEFY.".into())
+			} else {
+				// disable BEEFY for non-validator nodes that are warp syncing
+				disable_beefy = true;
+			}
+		}
+
 		Ok(Configuration {
 			impl_name: C::impl_name(),
 			impl_version: C::impl_version(),
@@ -515,7 +534,7 @@ pub trait CliConfiguration<DCV: DefaultConfigurationValues = ()>: Sized {
 			offchain_worker: self.offchain_worker(&role)?,
 			force_authoring: self.force_authoring()?,
 			disable_grandpa: self.disable_grandpa()?,
-			disable_beefy: self.disable_beefy()?,
+			disable_beefy,
 			dev_key_seed: self.dev_key_seed(is_dev)?,
 			tracing_targets: self.tracing_targets()?,
 			tracing_receiver: self.tracing_receiver()?,
